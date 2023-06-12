@@ -1,0 +1,6 @@
+venv/
+.env
+*test.py
+data/*
+.chroma
+.DS_Store
