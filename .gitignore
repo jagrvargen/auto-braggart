@@ -4,3 +4,4 @@ venv/
 data/*
 .chroma
 .DS_Store
+__pycache__
