@@ -25,15 +25,15 @@ from fetch_data import fetch_second_worksheet
 
 load_dotenv()
 
+chat_llm = ChatOpenAI(temperature=0.5, model="gpt-3.5-turbo-0613")
 llm = OpenAI(temperature=0.5)
 
 # Get user input
 
 brag = input("What did you accomplish? ")
 
-# examples = {"accomplishment": "Today, I helped Henry learn how to pass props"}
-
-prompt_template = """You are a helpful assistant whose task is to help a software engineer
+# brag accomplishment chain
+brag_template = """You are a helpful assistant whose task is to help a software engineer
 get track their progress in a brag document in order to get a promotion. Your task is to take
 the accomplishment that the user gives you and make sure it sounds succint but detailed, humble, professional, and that
 it's something an engineering manager would want to read. Do not add any additional facts, just stick to the ones the user provides you 
@@ -43,26 +43,74 @@ User's accomplishment: {brag}
 
 Your spruced up version: """
 
-prompt = PromptTemplate(input_variables=["brag", "date"], template=prompt_template)
+brag_prompt = PromptTemplate(input_variables=["brag", "date"], template=brag_template)
 
 # Pass input to initial prompt and return improved brag
 
-rewrite_chain = LLMChain(llm=llm, prompt=prompt)
+brag_chain = LLMChain(llm=llm, prompt=brag_prompt)
 
+professional_brag = brag_chain.run(brag=brag, date=datetime.now().strftime("%d-%m-%Y"))
 
+# Jira ticket chain
+jira_template = """You are a helpful assistant whose task is to help a software engineer
+get track their progress in a brag document in order to get a promotion. Your task is to 
+read through their Jira tickets, and if they've completed one (the status of the ticket is 'Released'),
+then summarize the work as an accomplishment that they can record. Include the ticket number.
 
-professional_brag = rewrite_chain.run(brag=brag, date=datetime.now().strftime("%d-%m-%Y"))
+The engineer's Jira ticket: {input}
+"""
+jira_prompt = PromptTemplate(input_variables=["input"], template=jira_template)
 
+jira_chain = LLMChain(llm=llm, prompt=jira_prompt)
+
+# Router chain
+from langchain.chains.router import MultiPromptChain
+from langchain.chains import ConversationChain
+from langchain.chains.router.llm_router import LLMRouterChain, RouterOutputParser
+from langchain.chains.router.multi_prompt_prompt import MULTI_PROMPT_ROUTER_TEMPLATE
+
+destination_chains = {'brag': brag_chain, 'jira': jira_chain}
+prompt_infos = [
+    {
+        "name": "brag",
+        "description": "Useful when the user has a generic accomplishment they would like to record",
+        "prompt_template": brag_template,
+    },
+    {
+        "name": "jira",
+        "description": "Good only when the user mentions finishing a jira task. If they don't mention Jira, not useful.",
+        "prompt_template": jira_template,
+    },
+]
+
+default_chain = ConversationChain(llm=llm, output_key="text")
+
+destinations = [f"{p['name']}: {p['description']}" for p in prompt_infos]
+destinations_str = "\n".join(destinations)
+router_template = MULTI_PROMPT_ROUTER_TEMPLATE.format(destinations=destinations_str)
+router_prompt = PromptTemplate(
+    template=router_template,
+    input_variables=["input"],
+    output_parser=RouterOutputParser(),
+)
+router_chain = LLMRouterChain.from_llm(llm, router_prompt)
+chain = MultiPromptChain(
+    router_chain=router_chain,
+    destination_chains=destination_chains,
+    default_chain=default_chain,
+    verbose=True,
+)
+print(chain.to_json())
 # Open brag doc file and parse questions and examples
     
-# overall_chain = SimpleSequentialChain(chains=[rewrite_chain, categorize_chain], verbose=True)
+# overall_chain = SimpleSequentialChain(chains=[brag_chain, categorize_chain], verbose=True)
 
 # overall_chain.run(brag)
 
 # Embed questions?
 
 embeddings = OpenAIEmbeddings(openai_api_key=os.getenv('OPENAI_API_KEY'))
-loader = BragDocLoader(filepath='Formatted Brag Doc - Jesse')
+loader = BragDocLoader()
 
 docs = loader.load()
 db = Chroma.from_documents(docs, embeddings)
@@ -79,5 +127,5 @@ db = Chroma.from_documents(docs, embeddings)
 docs = db.similarity_search(professional_brag)
 
 new_brag = Document(page_content=f"{professional_brag}", metadata={'row': docs[0].metadata['row']})
-brag_doc_writer = BragDocWriter(filepath='Formatted Brag Doc - Jesse')
+brag_doc_writer = BragDocWriter()
 brag_doc_writer.write(new_brag)

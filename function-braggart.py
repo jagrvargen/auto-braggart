@@ -24,10 +24,9 @@ load_dotenv()
 
 llm = ChatOpenAI(model="gpt-4-0613")
 # llm = OpenAI(temperature=0.1, model="gpt-3.5-turbo-0613")
-# llm = OpenAI(temperature=0.1)
 
 # brag = input("What did you accomplish? ")
-brag = "I fixed a bug"
+brag = "I finished some jira tickets"
 
 prompt_template = """You are a helpful assistant whose task is to help a software engineer
 get track their progress in a brag document in order to get a promotion. Your task is to take
@@ -66,33 +65,6 @@ db = Chroma.from_documents(docs, embeddings)
 
 jira_loader = JiraLoader()
 
-tools = [
-Tool(
-    name = "rewrite_chain",
-    func = rewrite_chain.run,
-    description = "Use when you first receive a user's accomplishment and need to rewrite it to make it sound professional"
-),
-Tool(
-    name = "categorize_chain",
-    func = db.similarity_search,
-    description = """Use after you've rewritten the user's accomplishment to categorize it according to the competency framework. 
-    Output a JSON where the key 'page_content' has the value of the accomplishment, and the key 'metadata' maps to an object where the key 'row' maps to row
-    of the first document returned from the categorization (found in the Document's metadata).
-    """
-),
-Tool(
-    name = "jira_loader",
-    func = jira_loader.load,
-    description = "Use if and only if the user input includes the word 'jira'. This is to fetch their Jira tickets from the API."
-),
-Tool(
-    name = "jira_chain",
-    func = jira_chain.run,
-    description = "Use if and only if you have just used the Jira Loader. Use this to summarize their accomplishment",
-    return_direct=True,
-)
-]
-
 # OpenAI Functions
 function_mapping = {
     "rewrite_chain": rewrite_chain.run,
@@ -130,13 +102,40 @@ function_descriptions = [
                     },
                     "required": ["professional_brag"],
                 },
-            }
+            },
+            {
+                "name": "jira_loader",
+                "description": "Use if and only if the user input includes the word 'jira'. This is to fetch their Jira tickets from the API.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "jql": {
+                            "type": "string",
+                            "description": "The JQL query to use to find the engineer's finished tasks",
+                        },
+                    },
+                },
+            },
+            {
+                "name": "jira_chain",
+                "description": "Use if and only if you have just used the Jira Loader. Use this to summarize the engineer's accomplishments.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "ticket": {
+                            "type": "string",
+                            "description": "the contents of the engineer's most recent Jira tickets",
+                        }
+                    },
+                    "required": ["ticket"],
+                },
+            },
 ]
 
 def call_func(func, **kwargs):
     return func(**kwargs)
 
-functions = [format_tool_to_openai_function(t) for t in tools]
+# functions = [format_tool_to_openai_function(t) for t in tools]
 # print(functions)
 message = llm.predict_messages([HumanMessage(content=brag)], functions=function_descriptions)
 # print(message)
@@ -145,19 +144,3 @@ kwargs = json.loads(message.additional_kwargs['function_call']['arguments'])
 kwargs['date'] = datetime.now().strftime("%d-%m-%Y")
 print(call_func(function_mapping[message.additional_kwargs['function_call']['name']], **kwargs))
 exit()
-
-# model = ChatOpenAI(temperature=0)
-# planner = load_chat_planner(model)
-# executor = load_agent_executor(model, tools, verbose=True)
-
-# agent = PlanAndExecute(planner=planner, executor=executor, verbose=True)
-# print(agent.run(brag))
-# exit()
-
-agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
-print(agent.agent.llm_chain.prompt.template)
-output = agent.run(brag)
-
-# page_content = 
-print(f"NEW BRAG ~~> {output}")
-# brag_doc_writer.write(new_brag)

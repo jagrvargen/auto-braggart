@@ -44,7 +44,7 @@ class BragDocLoader(BaseLoader, GoogleSheetsAuth):
 class BragDocWriter(GoogleSheetsAuth):
     """Writes the professional brag to the appropriate row in the brag document."""
 
-    def __init__(self, filepath) -> None:
+    def __init__(self, filepath: str = "Formatted Brag Doc - Jesse") -> None:
         super().__init__()
         self.filepath = filepath
 
