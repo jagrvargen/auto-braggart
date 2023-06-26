@@ -48,17 +48,17 @@ class BragDocWriter(GoogleSheetsAuth):
         super().__init__()
         self.filepath = filepath
 
-    def write(self, new_brag: Document) -> None:
-        sheet = self.client.open('Formatted Brag Doc - Jesse')
+    def write(self, new_brag: Document, filepath: str = 'Formatted Brag Doc - Jesse') -> None:
+        sheet = self.client.open(filepath)
         worksheet = sheet.get_worksheet(1)
         data = worksheet.get_all_records()
-
+        print(f'writing... "{new_brag.page_content}"')
         for index, row in enumerate(data, start=1):
             if new_brag.metadata['row'] == index + 1:  # define the is_title function to determine whether the row is a title
                 existing_answer = row['Notes']
                 # Append your text
                 new_answer = existing_answer + new_brag.page_content
-                print(f"\n Writing the accomplishment {new_answer}\nTo the category: {row['Accomplishments']}")
+                print(f"To the category: {row['Accomplishments']}")
 
                 # Write back the new answer to the second column (Google Sheets is 1-indexed)
                 worksheet.update_cell(index + 1, 2, new_answer)

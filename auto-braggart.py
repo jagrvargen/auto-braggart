@@ -1,20 +1,13 @@
-from langchain.agents import AgentType, Tool, create_csv_agent, initialize_agent
-from langchain.chains import LLMChain, SimpleSequentialChain, TransformChain
+from langchain.chains import LLMChain, SequentialChain
 from langchain.chat_models import ChatOpenAI
 from langchain.docstore.document import Document
-from langchain.document_loaders import UnstructuredExcelLoader
-from langchain.document_loaders.csv_loader import CSVLoader
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.indexes import VectorstoreIndexCreator
 from langchain.llms import OpenAI
 from langchain.prompts import FewShotPromptTemplate, PromptTemplate
 from langchain.prompts.example_selector import SemanticSimilarityExampleSelector
-from langchain.text_splitter import CharacterTextSplitter
-from langchain.tools import BaseTool, StructuredTool, Tool, YouTubeSearchTool, tool
-from langchain.utilities import PythonREPL
 from langchain.vectorstores import Chroma
 
-import csv
 import os
 
 from datetime import datetime
@@ -25,14 +18,15 @@ from fetch_data import fetch_second_worksheet
 
 load_dotenv()
 
-chat_llm = ChatOpenAI(temperature=0.5, model="gpt-3.5-turbo-0613")
-llm = OpenAI(temperature=0.5)
+gpt3_5 = ChatOpenAI(temperature=0.5, model="gpt-3.5-turbo-0613")
+# llm = OpenAI(temperature=0.5)
 
 # Get user input
 
 brag = input("What did you accomplish? ")
 
 # brag accomplishment chain
+
 brag_template = """You are a helpful assistant whose task is to help a software engineer
 get track their progress in a brag document in order to get a promotion. Your task is to take
 the accomplishment that the user gives you and make sure it sounds succint but detailed, humble, professional, and that
@@ -43,89 +37,64 @@ User's accomplishment: {brag}
 
 Your spruced up version: """
 
+
 brag_prompt = PromptTemplate(input_variables=["brag", "date"], template=brag_template)
 
 # Pass input to initial prompt and return improved brag
 
-brag_chain = LLMChain(llm=llm, prompt=brag_prompt)
-
+brag_chain = LLMChain(llm=gpt3_5, prompt=brag_prompt)
 professional_brag = brag_chain.run(brag=brag, date=datetime.now().strftime("%d-%m-%Y"))
 
-# Jira ticket chain
-jira_template = """You are a helpful assistant whose task is to help a software engineer
-get track their progress in a brag document in order to get a promotion. Your task is to 
-read through their Jira tickets, and if they've completed one (the status of the ticket is 'Released'),
-then summarize the work as an accomplishment that they can record. Include the ticket number.
-
-The engineer's Jira ticket: {input}
-"""
-jira_prompt = PromptTemplate(input_variables=["input"], template=jira_template)
-
-jira_chain = LLMChain(llm=llm, prompt=jira_prompt)
-
-# Router chain
-from langchain.chains.router import MultiPromptChain
-from langchain.chains import ConversationChain
-from langchain.chains.router.llm_router import LLMRouterChain, RouterOutputParser
-from langchain.chains.router.multi_prompt_prompt import MULTI_PROMPT_ROUTER_TEMPLATE
-
-destination_chains = {'brag': brag_chain, 'jira': jira_chain}
-prompt_infos = [
-    {
-        "name": "brag",
-        "description": "Useful when the user has a generic accomplishment they would like to record",
-        "prompt_template": brag_template,
-    },
-    {
-        "name": "jira",
-        "description": "Good only when the user mentions finishing a jira task. If they don't mention Jira, not useful.",
-        "prompt_template": jira_template,
-    },
-]
-
-default_chain = ConversationChain(llm=llm, output_key="text")
-
-destinations = [f"{p['name']}: {p['description']}" for p in prompt_infos]
-destinations_str = "\n".join(destinations)
-router_template = MULTI_PROMPT_ROUTER_TEMPLATE.format(destinations=destinations_str)
-router_prompt = PromptTemplate(
-    template=router_template,
-    input_variables=["input"],
-    output_parser=RouterOutputParser(),
-)
-router_chain = LLMRouterChain.from_llm(llm, router_prompt)
-chain = MultiPromptChain(
-    router_chain=router_chain,
-    destination_chains=destination_chains,
-    default_chain=default_chain,
-    verbose=True,
-)
-print(chain.to_json())
-# Open brag doc file and parse questions and examples
-    
-# overall_chain = SimpleSequentialChain(chains=[brag_chain, categorize_chain], verbose=True)
-
-# overall_chain.run(brag)
-
-# Embed questions?
-
+# Rank the closest category to the brag and write to Google Sheets
 embeddings = OpenAIEmbeddings(openai_api_key=os.getenv('OPENAI_API_KEY'))
-loader = BragDocLoader()
-
+loader = BragDocLoader(filepath='Blank Formatted Brag Doc - Jesse')
 docs = loader.load()
+
+# from langchain.embeddings import HuggingFaceInstructEmbeddings
+
+# instructor_embeddings = HuggingFaceInstructEmbeddings(model_name="hkunlp/instructor-xl", 
+#                                                       model_kwargs={"device": "cpu"})
+
 db = Chroma.from_documents(docs, embeddings)
+categories = db.similarity_search(professional_brag, k=3)
 
-# index = VectorstoreIndexCreator().from_loaders([loader])
+# new_brag = Document(page_content=f"{professional_brag}\n", metadata={'row': categories[0].metadata['row']})
+# brag_doc_writer = BragDocWriter()
+# brag_doc_writer.write(new_brag=new_brag, filepath='Blank Formatted Brag Doc - Jesse')
 
-# query = f"Which of the brag document value prompts fits best to the following software engineering accomplishment? {professional_brag}"
-# print(index.query(query))
 
-# # print(docs)
 
-# brag = "Today I finished writing a Notion document about how to improve our release process"
+# Give the user more leeway to select the category
+print(f'Select the most fitting category for your accomplishment -- "{professional_brag}"\n\n')
+for i in range(len(categories)):
+	print(f"{i+1}: {categories[i].page_content}\n")
 
-docs = db.similarity_search(professional_brag)
-
-new_brag = Document(page_content=f"{professional_brag}", metadata={'row': docs[0].metadata['row']})
+choice = int(input("Pick 1, 2, or 3: "))
+if choice not in (1,2,3):
+	choice = int(input("Pick 1, 2, or 3: "))
+new_brag = Document(page_content=f"{professional_brag}", metadata={'row': categories[choice-1].metadata['row']})
 brag_doc_writer = BragDocWriter()
-brag_doc_writer.write(new_brag)
+brag_doc_writer.write(new_brag, filepath='Blank Formatted Brag Doc - Jesse')
+
+
+
+# Use LLM to do the reasoning instead?
+# gpt_4 = ChatOpenAI(temperature=0.5, model="gpt-4-0613")
+
+# final_template = """You are a helpful assistant whose task is to help a software engineer
+# get track their progress in a brag document in order to get a promotion. Your task is to take
+# the accomplishment that the user gives you, compare it to the three competency categories that
+# are provided, and choose the best fit based on how well the accomplishment fits the desired
+# competency.
+
+# The accomplishment: {accomplishment}
+
+# The competency categories: 
+# {categories}
+
+# Output the chosen category in backticks like so: `{{chosen category}}`
+# """
+# final_prompt = PromptTemplate(input_variables=["accomplishment", "categories"], template=final_template)
+# final_chain = LLMChain(llm=gpt_4, prompt=final_prompt)
+# print("\nFinal chain:\n")
+# print(final_chain.run(accomplishment=professional_brag, categories=categories))

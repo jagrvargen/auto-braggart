@@ -5,3 +5,4 @@ data/*
 .chroma
 .DS_Store
 __pycache__
+*scratchpad.py

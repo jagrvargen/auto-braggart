@@ -36,5 +36,4 @@ class JiraLoader(BaseLoader, JiraAuth):
             Status: {issue.fields.status.name}
             """
             jira_docs.append(Document(page_content=ticket_content))
-        print(f"JIRA DOCS ~~~> {jira_docs}")
         return jira_docs

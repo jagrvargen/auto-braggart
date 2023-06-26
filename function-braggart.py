@@ -18,12 +18,11 @@ from dotenv import load_dotenv
 
 from brag_doc_loader import BragDocLoader, BragDocWriter
 from jira_loader import JiraLoader
-from tools.brag_doc_read_write_tool import CustomGoogleSheetsReaderTool, CustomGoogleSheetsWriterTool
 
 load_dotenv()
 
-llm = ChatOpenAI(model="gpt-4-0613")
-# llm = OpenAI(temperature=0.1, model="gpt-3.5-turbo-0613")
+# llm = ChatOpenAI(model="gpt-4-0613")
+llm = ChatOpenAI(temperature=0.1, model="gpt-3.5-turbo-0613")
 
 # brag = input("What did you accomplish? ")
 brag = "I finished some jira tickets"
@@ -69,6 +68,10 @@ jira_loader = JiraLoader()
 function_mapping = {
     "rewrite_chain": rewrite_chain.run,
     "categorize_chain": db.similarity_search,
+    "jira_loader": jira_loader.load,
+    "jira_chain": jira_chain.run,
+    "brag_doc_loader": brag_doc_loader.load,
+    "brag_doc_writer": brag_doc_writer.write,
 }
 function_descriptions = [
             {
@@ -108,12 +111,7 @@ function_descriptions = [
                 "description": "Use if and only if the user input includes the word 'jira'. This is to fetch their Jira tickets from the API.",
                 "parameters": {
                     "type": "object",
-                    "properties": {
-                        "jql": {
-                            "type": "string",
-                            "description": "The JQL query to use to find the engineer's finished tasks",
-                        },
-                    },
+                    "properties": {},
                 },
             },
             {
@@ -130,17 +128,59 @@ function_descriptions = [
                     "required": ["ticket"],
                 },
             },
+            {
+                "name": "brag_doc_writer",
+                "description": "Use when you've finished the engineer's accomplishments and need to write them to their brag document'",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "new_brag": {
+                            "type": "string",
+                            "description": "The formatted accomplishment that needs to be recorded",
+                        },
+                    },
+                    "required": ["new_brag"],
+                },
+            },
 ]
 
 def call_func(func, **kwargs):
     return func(**kwargs)
 
-# functions = [format_tool_to_openai_function(t) for t in tools]
-# print(functions)
-message = llm.predict_messages([HumanMessage(content=brag)], functions=function_descriptions)
-# print(message)
-print(json.loads(message.additional_kwargs['function_call']['arguments']))
-kwargs = json.loads(message.additional_kwargs['function_call']['arguments'])
-kwargs['date'] = datetime.now().strftime("%d-%m-%Y")
-print(call_func(function_mapping[message.additional_kwargs['function_call']['name']], **kwargs))
-exit()
+
+# third_response = llm.predict_messages([HumanMessage(content=user_request),
+#                                        AIMessage(content=str(first_response.additional_kwargs)),
+#                                        AIMessage(content=str(second_response.additional_kwargs)),
+#                                        ChatMessage(role='function',
+#                                                     additional_kwargs = {'name': function_name},
+#                                                     content = """
+#                                                         Just made the following updates: 2022, opex -23 and
+#                                                         Year: 2023
+#                                                         Category: headcount
+#                                                         Amount: 40
+#                                                     """
+#                                                    )
+#                                        ],
+#                                        functions=function_descriptions)
+stop = 10
+messages = [HumanMessage(content=brag)]
+while True:
+
+    message = llm.predict_messages(messages, functions=function_descriptions)
+    # print(type(message), message, "\n")
+    func = message.additional_kwargs['function_call']['name']
+    kwargs = json.loads(message.additional_kwargs['function_call']['arguments'])
+    if func == "rewrite_chain":
+        kwargs['date'] = datetime.now().strftime("%d-%m-%Y")
+
+    if func == "brag_doc_writer":
+        call_func(function_mapping[message.additional_kwargs['function_call']['name']], **kwargs)
+        break
+
+    res = call_func(function_mapping[message.additional_kwargs['function_call']['name']], **kwargs)
+
+    messages.append(AIMessage(content=str(message.additional_kwargs)))
+    print(messages, "\n")
+    stop -= 1
+    if not stop:
+        break
