@@ -28,7 +28,7 @@ brag = input("What did you accomplish? ")
 # brag accomplishment chain
 
 brag_template = """You are a helpful assistant whose task is to help a software engineer
-get track their progress in a brag document in order to get a promotion. Your task is to take
+track their progress in a brag document in order to get a promotion. Your task is to take
 the accomplishment that the user gives you and make sure it sounds succint but detailed, humble, professional, and that
 it's something an engineering manager would want to read. Do not add any additional facts, just stick to the ones the user provides you 
 If the user's input is already well written, just return it as is. If the user does not supply a definite date, append this one: {date}
